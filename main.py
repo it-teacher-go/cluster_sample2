@@ -1,9 +1,10 @@
-# main.py — 선수 유형 나누기: 능력치가 비슷한 축구 선수끼리 묶는다
+# main.py — 선수 유형 나누기: 고른 능력치로 묶고, 묶음 수도 바꿔 가며 정한다
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 st.set_page_config(page_title="선수 유형 나누기", page_icon="⚽", layout="wide")
 st.title("⚽ 선수 유형 나누기")
@@ -46,7 +47,15 @@ if len(고른항목) < 2:
 k = st.slider("몇 묶음으로 나눌까요", 2, 6, 3)
 
 Xs = StandardScaler().fit_transform(df[고른항목])          # 항목마다 변화 폭이 다르므로 표준화한다
-번호 = KMeans(n_clusters=k, n_init=10, random_state=42).fit_predict(Xs)
+
+
+
+def 나누기(개수):
+    """표준화한 값을 k-평균으로 나눈다. 난수를 고정해 다시 실행해도 결과가 같다."""
+    return KMeans(n_clusters=개수, n_init=10, random_state=42).fit(Xs)
+
+
+번호 = 나누기(k).labels_
 순서 = pd.Series(df["슈팅"].to_numpy()).groupby(번호).mean().sort_values(ascending=False).index
 자리 = {g: i for i, g in enumerate(순서)}
 df["묶음"] = [기호[자리[g]] for g in 번호]
@@ -97,3 +106,25 @@ st.subheader("묶음과 포지션은 얼마나 겹치는가")
 대조 = pd.crosstab(df["포지션"], df["묶음"]).reindex(columns=기호[:k], fill_value=0)
 st.dataframe(대조, width="stretch")
 st.caption("포지션은 묶는 데 사용하지 않았습니다. 두 구분이 겹치기는 하지만 일치하지는 않습니다.")
+
+# 여기부터 ③ — 묶음 수를 몇으로 할지 정하는 화면
+st.divider()
+st.subheader("묶음 수는 몇이 좋을까")
+
+합 = pd.DataFrame({"묶음 수": list(range(1, 8)),
+                   "거리 제곱의 합": [round(float(나누기(개수).inertia_), 1) for 개수 in range(1, 8)]})
+합["앞보다 줄어든 값"] = ["—" if pd.isna(v) else f"{v:,.1f}" for v in -합["거리 제곱의 합"].diff()]
+
+꺾은선 = px.line(합, x="묶음 수", y="거리 제곱의 합", markers=True)
+꺾은선.add_vline(x=k, line_dash="dash", annotation_text=f"지금 고른 묶음 수 {k}")
+꺾은선.update_layout(height=380, xaxis_title="묶음 수(k)", yaxis_title="묶음 안 거리 제곱의 합")
+st.plotly_chart(꺾은선, width="stretch")
+st.caption("묶음 수를 늘리면 값은 반드시 줄어듭니다. 줄어드는 폭이 크게 꺾이는 자리를 찾습니다.")
+st.dataframe(합, width="stretch", hide_index=True)
+
+점수 = pd.DataFrame([{"묶음 수": kk,
+                    "실루엣": round(float(silhouette_score(Xs, 나누기(kk).labels_)), 3)}
+                   for kk in range(2, 8)])
+st.plotly_chart(px.line(점수, x="묶음 수", y="실루엣", markers=True), width="stretch")
+st.dataframe(점수, width="stretch", hide_index=True)
+st.caption("실루엣 점수가 가장 높은 묶음 수와 사람이 이해하기 좋은 묶음 수가 늘 같지는 않습니다.")
